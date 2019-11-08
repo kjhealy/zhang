@@ -1,0 +1,116 @@
+---
+title: "rfm.Rmd"
+author: "Kieran healy"
+date: "11/8/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data
+
+The RFM table is a PDF file. We need to extract it and clean it up. I converted it to a CSV in Excel.
+
+```{r}
+library(tidyverse)
+
+rfm_tbl <- read_csv("data/rfm_table.csv")
+
+rfm_tbl 
+  
+```
+
+Clean up:
+
+1. Convert column names to lower/snake case
+2. Remove blank lines
+3. Separate the r, f, and m columns into pairs with their lower bound (if any) and upper bound. Names are e.g. `r_lo`, `r_hi` etc. The `separate()` function is very handy for splitting weirdly formatted columns into tractable data.
+4. Move the original columns to the end.
+5. Convert missing (`NA`) to zero: I'm assuming here that this is valid and that R, F, and M scores cannot be negative! 
+
+```{r}
+rfm_tbl <- rfm_tbl %>%
+  janitor::clean_names() %>%
+  filter_all(any_vars(!is.na(.))) %>%
+  separate(col = r, into = c("r_lo", "r_hi"), 
+           remove = FALSE, convert = TRUE, 
+           fill = "left") %>%
+  separate(col = f, into = c("f_lo", "f_hi"), 
+           remove = FALSE, convert = TRUE, 
+           fill = "left") %>%
+  separate(col = m, into = c("m_lo", "m_hi"), 
+           remove = FALSE, convert = TRUE, 
+           fill = "left") %>%
+  mutate_if(is.integer, replace_na, 0) %>%
+  select(segment, r_lo, r_hi, f_lo, f_hi, m_lo, m_hi, everything())
+  
+rfm_tbl
+
+```
+
+Much nicer now. 
+
+Looking at the criteria, this seems like a weird classification scheme! 
+
+For now, I won't use these directly in the function below, but one could.
+
+# Generate some Customer Score Data
+
+```{r}
+
+vals <- c(0:5)
+n = 1000
+
+customers <- tibble(r = sample(vals, n, replace = TRUE),
+                    f = sample(vals, n, replace = TRUE),
+                    m = sample(vals, n, replace = TRUE)
+                    ) 
+
+customers
+```
+
+## Classify triplets of r, f, and m scores
+
+```{r}
+
+calc_segment <- function(dat = customers){
+  case_when(
+    dat$r >= 4 & dat$r <= 5 & dat$f >= 4 & dat$f <= 5 & dat$m >= 4 & dat$m <= 5 ~ "Champion",
+    dat$r >= 2 & dat$r <= 5 & dat$f >= 3 & dat$f <= 5 & dat$m >= 3 & dat$m <= 5 ~ "Loyal Customer",
+    dat$r >= 3 & dat$r <= 5 & dat$f >= 1 & dat$f <= 3 & dat$m >= 1 & dat$m <= 3 ~ "Potential Loyalist",
+    dat$r >= 4 & dat$r <= 5 & dat$f >= 0 & dat$f <= 1 & dat$m >= 0 & dat$m <= 1 ~ "New Customer",
+    dat$r >= 3 & dat$r <= 4 & dat$f >= 0 & dat$f <= 1 & dat$m >= 0 & dat$m <= 1 ~ "Promising",
+    dat$r >= 2 & dat$r <= 3 & dat$f >= 2 & dat$f <= 3 & dat$m >= 2 & dat$m <= 3 ~ "Need Attention",
+    dat$r >= 3 & dat$r <= 3 & dat$f >= 0 & dat$f <= 2 & dat$m >= 0 & dat$m <= 2 ~ "About to Sleep",
+    dat$r >= 0 & dat$r <= 2 & dat$f >= 2 & dat$f <= 5 & dat$m >= 2 & dat$m <= 5 ~ "At Risk",
+    dat$r >= 0 & dat$r <= 1 & dat$f >= 4 & dat$f <= 5 & dat$m >= 4 & dat$m <= 5 ~ "Can't Lose Them",
+    dat$r >= 1 & dat$r <= 2 & dat$f >= 1 & dat$f <= 2 & dat$m >= 1 & dat$m <= 2 ~ "Hibernating",
+    dat$r >= 0 & dat$r <= 2 & dat$f >= 0 & dat$f <= 2 & dat$m >= 0 & dat$m <= 2 ~ "Lost",
+    TRUE ~ "Other"
+  )  
+}
+
+```
+
+## Apply it to the data
+
+```{r}
+customers <- customers %>% 
+  add_column(segment = calc_segment(customers))
+  
+customers
+```
+
+```{r}
+customers %>% 
+  group_by(segment) %>% 
+  tally() %>%
+  arrange(desc(n))
+```
+
+I wrote the criteria quickly so I'm not sure if this is right. But in general `case_when()` is a useful function to look at when you have multiple `if_else()` statements that you want to test a bunch of rows on.
+
+
+
